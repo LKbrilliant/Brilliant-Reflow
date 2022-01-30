@@ -1,9 +1,10 @@
 /* 
-Project: Brilliant Reflow
-version: v1.0
-Start Date: 2021.06.01
-Code Completed : 2021.06.27
+Project:  Brilliant Reflow
+Code by:  LKBrilliant
+version:  v1.1
+Date:     2022.01.30
 
+Display Dimensions:
       _ _ _ _ _ _ _ _ _ _ _ _ _
      |          y=160          |
      |                         |
@@ -23,7 +24,9 @@ TODO
 ✔ edit the selected value in the settings
 ✔ add time and temp limits to the editable fields
 ✔ save the edited values to the EEPROM
-+ Try only P-I controller
++ Change PID values in settings page using three digits
++ Ask to save if going back form the settings page after changing values  
++ Try only P-I or P-D controller
 */
 
 #include <SPI.h>
@@ -47,6 +50,8 @@ TODO
 
 Ucglib_ST7735_18x128x160_HWSPI ucg(PA2, PA4, PA3);
 MAX6675 thermocouple(PA9, PA8, PA10);
+
+bool debug = true;        // Show PID output info on the disply when heating
 
 bool blinkState = false;
 
@@ -212,17 +217,19 @@ void loop(void) {
       setColor(red);
       ucg.drawPixel(T, t);     // Plot the temperature on the graph
 
-      ucg.setPrintPos(73,35);           
-      ucg.print("out:"+String(Output));
-      ucg.setPrintPos(63,35);           
-      ucg.print("set:"+String(Setpoint));
-      for (byte i=0; i<=2; i++){
-        ucg.setFont(ucg_font_6x12_tr);
-        ucg.setPrintPos(72 - i*10, 127);
-        ucg.print(pid_[i]);
-        ucg.setFont(ucg_font_6x12_mr);
-        ucg.setPrintPos(72 - i*10, 134);
-        ucg.print(K_pid[i]);
+      if(debug){
+        ucg.setPrintPos(73,35);           
+        ucg.print("out:"+String(Output));
+        ucg.setPrintPos(63,35);           
+        ucg.print("set:"+String(Setpoint));
+        for (byte i=0; i<=2; i++){
+          ucg.setFont(ucg_font_6x12_tr);
+          ucg.setPrintPos(72 - i*10, 127);
+          ucg.print(pid_[i]);
+          ucg.setFont(ucg_font_6x12_mr);
+          ucg.setPrintPos(72 - i*10, 134);
+          ucg.print(K_pid[i]);
+        }
       }
 
       if (plotTime > maxTime) {
