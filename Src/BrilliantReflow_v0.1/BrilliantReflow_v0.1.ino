@@ -1,32 +1,56 @@
 /* 
-Project:  Brilliant Reflow
-Code by:  LKBrilliant
-version:  v1.1
-Date:     2022.01.30
-
-Display Dimensions:
-      _ _ _ _ _ _ _ _ _ _ _ _ _
-     |          y=160          |
-     |                         |
-     |                         |
-   x=128                       |
-     |                         |
-     |                         |
-     |_ _ _ _ _ _ _ _ _ _ _ _ _|
-   (0,0)
-
-TODO      
-✔ Shifting the real time temperature when 3 digits are displaying - 2021.06.07
-✔ Add the settings page
-✔ selection highlighting on settings page
-✔ Add PID
-✔ Tune PID
-✔ edit the selected value in the settings
-✔ add time and temp limits to the editable fields
-✔ save the edited values to the EEPROM
-+ Change PID values in settings page using three digits
-+ Ask to save if going back form the settings page after changing values  
-+ Try only P-I or P-D controller
+* ░█▀▄░█▀▄░▀█▀░█░░░█░░░▀█▀░█▀█░█▀█░▀█▀░░░█▀▄░█▀▀░█▀▀░█░░░█▀█░█░█
+* ░█▀▄░█▀▄░░█░░█░░░█░░░░█░░█▀█░█░█░░█░░░░█▀▄░█▀▀░█▀▀░█░░░█░█░█▄█
+* ░▀▀░░▀░▀░▀▀▀░▀▀▀░▀▀▀░▀▀▀░▀░▀░▀░▀░░▀░░░░▀░▀░▀▀▀░▀░░░▀▀▀░▀▀▀░▀░▀
+* Project:    Brilliant Reflow
+* Code by:    Anuradha Gunawardhana
+* version:    v1.0.0
+* Date:       2022.01.30
+* 
+* Hardware:   Display - ST7735(128x160)TFT
+*             Thermocouple Interface - MAX6675
+*             Microcontroller - STM32F103C8T6
+*             ST-LINK - CubeProgrammer - https://www.st.com/en/development-tools/stm32cubeprog.html
+* 
+* Libraries:  PID(v1.2.0) by Brett Beauregard : https://github.com/br3ttb/Arduino-PID-Library
+*             Ucglib(v1.5.2) by Oliver: https://github.com/olikraus/ucglib
+*             MAX6675(v1.1.0) by Adafruit: https://github.com/adafruit/MAX6675-library
+* 
+* Arduino STM32 Boards:(v2.0.0) https://github.com/stm32duino/Arduino_Core_STM32
+* 
+* Note: If Ucglib did not compile with the STM32(arm architecture) add the following lines just 
+*       after "Ucglib.h" line at the begining of the 'Ucglib.cpp'. 
+*       
+*                 #if defined(__NOP)
+*                 #undef __NOP
+*                 #endif
+*                 #define __NOP __asm volatile ("nop")
+*                 #endif
+*       
+*       You can find the Ucglib.cpp' on; Windows: Documents/Arduino/libraries/Ucglib/src/Ucglib.cpp
+*                                        Linux: /home/USERNAME/Arduino/libraries/Ucglib/src/Ucglib.cpp
+* 
+* License: MIT License
+* 
+* Copyright (c) 2021 Anuradha Gunawardhana
+* 
+* Permission is hereby granted, free of charge, to any person obtaining a copy
+* of this software and associated documentation files (the "Software"), to deal
+* in the Software without restriction, including without limitation the rights
+* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+* copies of the Software, and to permit persons to whom the Software is
+* furnished to do so, subject to the following conditions:
+* 
+* The above copyright notice and this permission notice shall be included in all
+* copies or substantial portions of the Software.
+* 
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+* SOFTWARE.
 */
 
 #include <SPI.h>
@@ -35,7 +59,7 @@ TODO
 #include "Ucglib.h"
 #include "max6675.h"
 
-// Unique values for colors
+// Unique identifiers for colors
 #define black   100
 #define yellow  101
 #define red     102
@@ -45,13 +69,15 @@ TODO
 
 #define SSR_out PB8
 
-#define btnDebounceDelay 200
-#define tempSampleRate 200
+#define btnDebounceDelay  300
+#define btnHoldDelay     1000
+#define btnHoldUpdateRate  50
+#define tempSampleRate    200
 
 Ucglib_ST7735_18x128x160_HWSPI ucg(PA2, PA4, PA3);
 MAX6675 thermocouple(PA9, PA8, PA10);
 
-bool debug = true;        // Show PID output info on the disply when heating
+bool debug = false;        // Show PID output info on the disply when heating
 
 bool blinkState = false;
 
@@ -115,6 +141,8 @@ byte page = 0;
 byte previosPage = 0;
 
 volatile unsigned long lstBtnBounce = 0;
+volatile unsigned long hold_start = 0;
+unsigned long last_val_change = 0;
 
 void setup(void) {
   pinMode(PB3, INPUT_PULLUP);
@@ -244,10 +272,13 @@ void loop(void) {
     myPID.Compute();
     analogWrite(SSR_out, Output);
   }
+  if(!digitalRead(PB3) && (millis()-hold_start)>=btnHoldDelay) holding_up();
+  if(!digitalRead(PB6) && (millis()-hold_start)>=btnHoldDelay) holding_down();
 }
 
 void up() {
   if ((millis() - lstBtnBounce) > btnDebounceDelay) {
+    hold_start = millis();
     if (!editSettings){
       vertical_pos -= 1;
       if (page == 0 && vertical_pos == 0) vertical_pos = 3;
@@ -257,8 +288,8 @@ void up() {
     }
     else{
       if (horizontal_pos == 1 && profiles[previosPage-1][vertical_pos-2][1] < 500) profiles[previosPage-1][vertical_pos-2][1] += 1; // Max Time limit
-      if (horizontal_pos == 2 && profiles[previosPage-1][vertical_pos-2][0] < 250) profiles[previosPage-1][vertical_pos-2][0] += 1; // Max Temp limit
-      if (horizontal_pos == 3) K_pid[vertical_pos-2] += 0.01;
+      else if (horizontal_pos == 2 && profiles[previosPage-1][vertical_pos-2][0] < 250) profiles[previosPage-1][vertical_pos-2][0] += 1; // Max Temp limit
+      else if (horizontal_pos == 3 && K_pid[vertical_pos-2] < 9.99) K_pid[vertical_pos-2] += 0.01;
     }
     drawSelector();
     lstBtnBounce = millis();
@@ -267,6 +298,7 @@ void up() {
 
 void down() {
   if ((millis() - lstBtnBounce) > btnDebounceDelay) {
+    hold_start = millis();
     if (!editSettings){
       vertical_pos += 1;
       if (page == 0 && vertical_pos == 4) vertical_pos = 1;
@@ -276,8 +308,8 @@ void down() {
     }
     else{
       if (horizontal_pos == 1 && profiles[previosPage-1][vertical_pos-2][1] > 0) profiles[previosPage-1][vertical_pos-2][1] -= 1;  // Min Time limit
-      if (horizontal_pos == 2 && profiles[previosPage-1][vertical_pos-2][0] > 25) profiles[previosPage-1][vertical_pos-2][0] -= 1; // Min Temp limit
-      if (horizontal_pos == 3) K_pid[vertical_pos-2] -= 0.01;
+      else if (horizontal_pos == 2 && profiles[previosPage-1][vertical_pos-2][0] > 25) profiles[previosPage-1][vertical_pos-2][0] -= 1; // Min Temp limit
+      else if (horizontal_pos == 3 && K_pid[vertical_pos-2] > 0) K_pid[vertical_pos-2] -= 0.01;
     }
     drawSelector();
     lstBtnBounce = millis();
@@ -311,6 +343,26 @@ void right() {
       drawSelector();
       lstBtnBounce = millis();
     }
+  }
+}
+
+void holding_up(){
+  if (editSettings && (millis() - last_val_change) > btnHoldUpdateRate){
+    if (horizontal_pos == 1 && profiles[previosPage-1][vertical_pos-2][1] < 500) profiles[previosPage-1][vertical_pos-2][1] += 1; // Max Time limit
+    else if (horizontal_pos == 2 && profiles[previosPage-1][vertical_pos-2][0] < 250) profiles[previosPage-1][vertical_pos-2][0] += 1; // Max Temp limit
+    else if (horizontal_pos == 3 && K_pid[vertical_pos-2] < 9.99) K_pid[vertical_pos-2] += 0.01;
+    drawSelector();
+    last_val_change = millis();
+  }
+}
+
+void holding_down(){
+  if (editSettings && (millis() - last_val_change) > btnHoldUpdateRate){
+    if (horizontal_pos == 1 && profiles[previosPage-1][vertical_pos-2][1] > 0) profiles[previosPage-1][vertical_pos-2][1] -= 1;  // Min Time limit
+    else if (horizontal_pos == 2 && profiles[previosPage-1][vertical_pos-2][0] > 25) profiles[previosPage-1][vertical_pos-2][0] -= 1; // Min Temp limit
+    else if (horizontal_pos == 3 && K_pid[vertical_pos-2] > 0) K_pid[vertical_pos-2] -= 0.01;
+    drawSelector();
+    last_val_change = millis();
   }
 }
 
